@@ -4,6 +4,7 @@ import numpy as np
 import os
 import time
 import cv2
+from datetime import datetime
 
 from yolo_worker import YoloWorker
 
@@ -11,14 +12,11 @@ class ContentMonitor(QObject):
     detection_signal = pyqtSignal(dict, QPixmap)
     
     def __init__(self, browser_window):
-        """Initialize the content monitor with a browser window."""
         super().__init__()
-
-        # Class thresholds must be defined BEFORE creating the worker
         self.class_thresholds = {
             'violence': 0.90,
             'adult': 0.40,
-            'weapons': 0.70,
+            'weapons': 0.50,
             'drugs': 0.30,
             'gore': 0.30,
         }
@@ -27,9 +25,8 @@ class ContentMonitor(QObject):
         self.processing_lock = QMutex()
         self.active = True
         self.skip_frame = False
-        self.capture_count = 0
         self.last_detection_time = 0
-        self.detection_cooldown = 1.0
+        self.detection_cooldown = 1.0  # seconds
 
         # Debug directories
         self.debug_dir = "browser_captures"
@@ -44,13 +41,14 @@ class ContentMonitor(QObject):
         self.yolo_worker.result_ready.connect(self.handle_results)
         self.thread.start()
 
-        # Set up a timer to periodically check content
+        # Set up monitoring timer
         self.timer = QTimer()
         self.timer.timeout.connect(self.safe_check_content)
+        self.timer.setInterval(1000)  # Check every second
 
     def start(self):
         self.active = True
-        self.timer.start(1000)  # every second
+        self.timer.start()
     
     def stop_monitoring(self):
         self.active = False
@@ -62,8 +60,11 @@ class ContentMonitor(QObject):
         
         # Clean up worker thread
         if hasattr(self, 'thread') and self.thread.isRunning():
+            self.yolo_worker.cleanup()
             self.thread.quit()
-            self.thread.wait(500)  # Wait up to 500ms
+            self.thread.wait(1000)
+            if self.thread.isRunning():
+                self.thread.terminate()
         
     def safe_check_content(self):
         if not self.processing_lock.tryLock():
@@ -84,25 +85,20 @@ class ContentMonitor(QObject):
         if not self.active or not self.browser.isVisible():
             return
 
-        # Get viewport and scroll information
+        # Get viewport information
         viewport_size = self.browser.size()
         scroll_pos = self.browser.page().scrollPosition()
-        page_size = self.browser.page().contentsSize()
         
-        # Capture the visible portion first
+        # Capture the visible portion
         visible_pixmap = self.browser.grab()
         
-        # Calculate scale factors
-        scale_w = visible_pixmap.width() / viewport_size.width()
-        scale_h = visible_pixmap.height() / viewport_size.height()
-        
-        # Convert to numpy
+        # Convert to numpy array
         qimg = visible_pixmap.toImage()
         ptr = qimg.bits()
         ptr.setsize(qimg.byteCount())
         arr = np.frombuffer(ptr, np.uint8).reshape((qimg.height(), qimg.width(), 4))[:,:,:3]
         
-        # Submit with scroll and size info
+        # Submit for detection
         QMetaObject.invokeMethod(
             self.yolo_worker,
             "detect_from_image",
@@ -115,11 +111,10 @@ class ContentMonitor(QObject):
         )
 
     def handle_results(self, detections):
-        """Include scroll position when emitting detections"""
+        """Process and emit detection results"""
         scroll_pos = self.browser.page().scrollPosition()
         viewport_size = self.browser.size()
         
-        # Convert detections to viewport-relative coordinates
         viewport_detections = []
         for det in detections:
             try:
@@ -129,7 +124,7 @@ class ContentMonitor(QObject):
                 x2 = det['xyxy'][2] - scroll_pos.x()
                 y2 = det['xyxy'][3] - scroll_pos.y()
                 
-                # Only include detections that are at least partially visible
+                # Only include visible detections
                 if not (x2 < 0 or y2 < 0 or x1 > viewport_size.width() or y1 > viewport_size.height()):
                     viewport_detections.append({
                         'xyxy': [x1, y1, x2, y2],
@@ -137,10 +132,10 @@ class ContentMonitor(QObject):
                         'conf': det['conf']
                     })
             except Exception as e:
-                print(f"Error processing detection: {e}")
+                print(f"Error processing detection: {str(e)}")
                 continue
         
-        # Package detection data with viewport info
+        # Package detection data
         detection_data = {
             'detections': viewport_detections,
             'scroll_x': scroll_pos.x(),
@@ -149,20 +144,17 @@ class ContentMonitor(QObject):
             'viewport_height': viewport_size.height()
         }
         
+        self.last_detection_time = time.time()
         self.detection_signal.emit(detection_data, self.browser.grab())
-
-    def update_threshold(self, class_name, threshold):
-        self.class_thresholds[class_name] = threshold
 
     def update_threshold(self, class_name, threshold):
         """Update threshold for both monitor and worker"""
         with QMutexLocker(self.processing_lock):
             self.class_thresholds[class_name] = threshold
-            # Update worker thread safely
             QMetaObject.invokeMethod(
                 self.yolo_worker,
                 "update_threshold",
                 Qt.QueuedConnection,
                 Q_ARG(str, class_name),
                 Q_ARG(float, threshold)
-        )
+            )

@@ -1,0 +1,7 @@
+__pycache__/
+browser_captures/
+detection_results/
+for_text_model/
+venv/
+
+best.pt
