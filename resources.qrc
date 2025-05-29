@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="/qtwebchannel">
+    <file>node_modules/qtwebchannel/qwebchannel.js</file>
+  </qresource>
+</RCC>

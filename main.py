@@ -178,6 +178,9 @@ class MainWindow(QMainWindow):
         browser = QWebEngineView()
         browser.setUrl(qurl)
 
+        # Connect text extraction to loadFinished signal
+        browser.loadFinished.connect(lambda ok: self.handle_page_loaded(browser, ok))
+
         # Connect scroll handler
         browser.page().scrollPositionChanged.connect(
             lambda: self.overlays[self.tabs.indexOf(browser)].update_position()
@@ -195,6 +198,14 @@ class MainWindow(QMainWindow):
         channel = QWebChannel()
         channel.registerObject("pyObj", bridge)
         browser.page().setWebChannel(channel)
+
+        # Load the qwebchannel.js file
+        qwebchannel_js = QFile(":/qtwebchannel/qwebchannel.js")
+        if qwebchannel_js.open(QIODevice.ReadOnly):
+            browser.page().runJavaScript(qwebchannel_js.readAll().data().decode())
+            qwebchannel_js.close()
+        else:
+            print("Failed to load qwebchannel.js")
 
         # Inject JavaScript for mutation observer
         browser.page().runJavaScript("""
@@ -363,6 +374,7 @@ class MainWindow(QMainWindow):
             overlay.update_position()
 
     def on_dom_change(self, browser):
+        print("\n\n\n\n\n\nDOM changed, extracting text...")
         tab_index = self.tabs.indexOf(browser)
         now = time.time()
         last_time = self.last_dom_change_time.get(tab_index, 0)
@@ -372,13 +384,17 @@ class MainWindow(QMainWindow):
 
         self.last_dom_change_time[tab_index] = now
 
-        extract_text_from_page(browser)
-
         monitor = self.monitors.get(tab_index)
         if monitor:
             monitor.check_content()
 
-
+    def handle_page_loaded(self, browser, ok):
+        """Handle page load completion"""
+        if ok:  # Only proceed if load was successful
+            print(f"Page loaded successfully: {browser.url().toString()}")
+            extract_text_from_page(browser)
+        else:
+            print(f"Page failed to load: {browser.url().toString()}")
 
 app = QApplication(sys.argv)
 app.setApplicationName("Child Protection Browser")
