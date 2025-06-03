@@ -397,7 +397,7 @@ class MainWindow(QMainWindow):
             print(f"Page failed to load: {browser.url().toString()}")
 
 app = QApplication(sys.argv)
-app.setApplicationName("Child Protection Browser")
+app.setApplicationName("Child Protection Browser")  
 app.setOrganizationName("Child Protection")
 app.setOrganizationDomain("childprotection.org")
 

@@ -4,7 +4,6 @@ from PyQt5.QtCore import QDateTime
 
 def get_output_base_dir():
     """Get the absolute path to the project root directory"""
-    # Get the directory where the script is running from
     project_root = pathlib.Path(__file__).parent.resolve()
     base_dir = project_root / "text_extractions"
     return base_dir
@@ -13,39 +12,34 @@ def ensure_directory_exists(directory):
     """Create directory if it doesn't exist"""
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        print(f"Directory ensured: {directory}")
         return True
     except Exception as e:
         print(f"Directory creation failed: {str(e)}")
         return False
 
-def save_extracted_content(content_type, content, timestamp):
-    """Save content to appropriate file"""
+def save_extracted_content(content_type, content):
+    """Save content to fixed filename (overwrites existing)"""
     base_dir = get_output_base_dir()
-    sub_dir = base_dir / content_type  # 'html' or 'text'
+    sub_dir = base_dir / content_type
     
     if not ensure_directory_exists(sub_dir):
         return False
     
     try:
         ext = 'html' if content_type == 'html' else 'txt'
-        filename = sub_dir / f"extracted_{timestamp}.{ext}"
+        filename = sub_dir / f"extracted_content.{ext}"
         
         with open(filename, 'w', encoding='utf-8') as f:
             f.write(content)
         
-        print(f"Saved {content_type} to: {filename}")
+        print(f"Updated {content_type} file at: {filename}")
         return True
     except Exception as e:
-        print(f"Failed to save {content_type}: {str(e)}")
+        print(f"Failed to update {content_type} file: {str(e)}")
         return False
 
 def extract_text_from_page(page):
-    """Extract and save text content from the page"""
-    # First print where we're trying to save
-    base_dir = get_output_base_dir()
-    print(f"Attempting to save text extractions to: {base_dir}")
-
+    """Extract and update text content in fixed files"""
     # JavaScript code to extract both HTML-tagged and plain text
     js_code = """
     (function() {
@@ -85,16 +79,14 @@ def extract_text_from_page(page):
             print("No text content received from JavaScript")
             return
             
-        timestamp = QDateTime.currentDateTime().toString("yyyyMMdd_hhmmss")
-        
-        # Save HTML content
+        # Save/update HTML content
         if result.get('html'):
             html_content = "\n".join([line.strip() for line in result['html'].splitlines() if line.strip()])
-            save_extracted_content('html', html_content, timestamp)
+            save_extracted_content('html', html_content)
         
-        # Save plain text
+        # Save/update plain text
         if result.get('text'):
             plain_text = "\n".join([line.strip() for line in result['text'].splitlines() if line.strip()])
-            save_extracted_content('text', plain_text, timestamp)
+            save_extracted_content('text', plain_text)
 
     page.page().runJavaScript(js_code, handle_result)

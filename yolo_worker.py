@@ -19,7 +19,7 @@ class YoloWorker(QObject):
             'gore': 0.30,
         }
         self.last_detection_time = 0
-        self.detection_cooldown = 0.5  # seconds between detections
+        self.detection_cooldown = 0.05  # seconds between detections
 
     @pyqtSlot(np.ndarray, int, int, int, int)
     def detect_from_image(self, img, viewport_width, viewport_height, scroll_x, scroll_y):

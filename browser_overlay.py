@@ -15,7 +15,7 @@ class BrowserOverlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         
         # Visual settings
-        self.fill_color = QColor(0, 0, 0, 230)  # Semi-transparent red
+        self.fill_color = QColor(0, 0, 0, 240)  # Semi-transparent red
         self.border_color = QColor(0, 0, 0, 230)
         self.border_width = 2
         
