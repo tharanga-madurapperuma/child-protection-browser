@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
             monitor.start()
         
         self.tabs.setCurrentIndex(tab_index)
-        browser.loadFinished.connect(lambda: monitor.check_content())  # Add this line
+        browser.loadFinished.connect(lambda: monitor.adaptive_check_content())  # New line
         return browser
 
     # Modify the handle_detections method

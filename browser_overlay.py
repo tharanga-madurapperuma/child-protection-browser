@@ -6,29 +6,51 @@ class BrowserOverlay(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.detections = []
+        self.stable_detections = []  # Stores confirmed detections
         self.last_update_time = 0
-        self.update_cooldown = 100  # ms
+        self.update_cooldown = 100
+        self.inactivity_timeout = 2000  # 2 seconds of no mouse events
+        self.last_activity_time = QDateTime.currentMSecsSinceEpoch()
         
-        # Critical settings for proper event handling
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
         
         # Visual settings
-        self.fill_color = QColor(0, 0, 0, 240)  # Semi-transparent red
+        self.fill_color = QColor(0, 0, 0, 240)
         self.border_color = QColor(0, 0, 0, 230)
         self.border_width = 2
         
-        # Setup update timer
+        # Setup timers
         self.update_timer = QTimer(self)
         self.update_timer.timeout.connect(self.update_position)
         self.update_timer.start(100)
         
-        # Initial positioning
+        self.inactivity_timer = QTimer(self)
+        self.inactivity_timer.timeout.connect(self.check_inactivity)
+        self.inactivity_timer.start(500)
+        
         self.update_position()
 
+    def check_inactivity(self):
+        current_time = QDateTime.currentMSecsSinceEpoch()
+        if current_time - self.last_activity_time > self.inactivity_timeout:
+            self.use_stable_detections()
+        else:
+            self.use_live_detections()
+
+    def use_stable_detections(self):
+        """Use the most consistent detections during inactivity"""
+        if self.stable_detections and not self.detections:
+            self.detections = self.stable_detections.copy()
+            self.update()
+
+    def use_live_detections(self):
+        """Use real-time detections when active"""
+        if self.detections:
+            self.stable_detections = self.detections.copy()
+
     def update_position(self):
-        """Handle high DPI scaling and positioning"""
         if not self.parent():
             return
             
@@ -36,20 +58,14 @@ class BrowserOverlay(QWidget):
         if current_time - self.last_update_time < self.update_cooldown:
             return
             
-        # Get device pixel ratio
         dpr = self.parent().devicePixelRatioF()
-        
         scroll_pos = self.parent().page().scrollPosition()
         viewport = self.parent().visibleRegion().boundingRect()
         
         if not viewport.isValid():
             viewport = self.parent().rect()
         
-        self.setGeometry(
-            0, 0,
-            int(viewport.width() * dpr),
-            int(viewport.height() * dpr))
-        
+        self.setGeometry(0, 0, int(viewport.width() * dpr), int(viewport.height() * dpr))
         self.last_update_time = current_time
         if self.detections:
             self.update()
