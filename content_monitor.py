@@ -49,6 +49,9 @@ class ContentMonitor(QObject):
         self.timer.timeout.connect(self.adaptive_check_content)
         self.timer.start(self.adaptive_interval)
 
+        self.last_activity_time = time.time()
+        self.activity_timeout = 2.0  # 2 second
+
     def start(self):
         self.active = True
         self.timer.start()
@@ -129,24 +132,23 @@ class ContentMonitor(QObject):
         viewport_size = self.browser.size()
         
         viewport_detections = []
-        for det in detections:
-            try:
-                # Convert from absolute to viewport-relative coordinates
-                x1 = det['xyxy'][0] - scroll_pos.x()
-                y1 = det['xyxy'][1] - scroll_pos.y()
-                x2 = det['xyxy'][2] - scroll_pos.x()
-                y2 = det['xyxy'][3] - scroll_pos.y()
-                
-                # Only include visible detections
-                if not (x2 < 0 or y2 < 0 or x1 > viewport_size.width() or y1 > viewport_size.height()):
-                    viewport_detections.append({
-                        'xyxy': [x1, y1, x2, y2],
-                        'class': det['class'],
-                        'conf': det['conf']
-                    })
-            except Exception as e:
-                print(f"Error processing detection: {str(e)}")
-                continue
+        if detections:  # Only process if we have detections
+            for det in detections:
+                try:
+                    x1 = det['xyxy'][0] - scroll_pos.x()
+                    y1 = det['xyxy'][1] - scroll_pos.y()
+                    x2 = det['xyxy'][2] - scroll_pos.x()
+                    y2 = det['xyxy'][3] - scroll_pos.y()
+                    
+                    if not (x2 < 0 or y2 < 0 or x1 > viewport_size.width() or y1 > viewport_size.height()):
+                        viewport_detections.append({
+                            'xyxy': [x1, y1, x2, y2],
+                            'class': det['class'],
+                            'conf': det['conf']
+                        })
+                except Exception as e:
+                    print(f"Detection processing error: {str(e)}")
+                    continue
         
         # Package detection data
         detection_data = {
@@ -154,12 +156,10 @@ class ContentMonitor(QObject):
             'scroll_x': scroll_pos.x(),
             'scroll_y': scroll_pos.y(),
             'viewport_width': viewport_size.width(),
-            'viewport_height': viewport_size.height(),
-            'fps': 1/max(0.001, self.yolo_worker.avg_process_time) if hasattr(self.yolo_worker, 'avg_process_time') else 0,
-            'interval': self.adaptive_interval
+            'viewport_height': viewport_size.height()
         }
         
-        self.last_detection_time = time.time()
+        print(f"[Detection] Found {len(detections)} raw, {len(viewport_detections)} visible")
         self.detection_signal.emit(detection_data, self.current_pixmap)
 
     def update_threshold(self, class_name, threshold):

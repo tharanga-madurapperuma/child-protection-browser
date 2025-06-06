@@ -262,18 +262,17 @@ class MainWindow(QMainWindow):
         if not overlay:
             return
             
-        if detection_data and detection_data.get('detections'):
-            # Force update position before showing detections
-            overlay.update_position()
-            overlay.set_detections(detection_data)
-            overlay.show()
-            self.warning_label.setText(
-                f"⚠️ Blocked {len(detection_data['detections'])} inappropriate regions"
-            )
-            self.warning_label.show()
-        else:
-            overlay.hide()
-            self.warning_label.hide()
+        # Safely check for detections
+        has_detections = bool(detection_data and detection_data.get('detections'))
+        
+        # Update warning label
+        if has_detections:
+            det_count = len(detection_data['detections'])
+            self.warning_label.setText(f"⚠️ Blocked {det_count} inappropriate regions")
+        self.warning_label.setVisible(has_detections)
+        
+        # Update overlay
+        overlay.set_detections(detection_data if has_detections else None)
 
     # ADD NEW TAB ON DOUBLE CLICK ON TABS
     def tab_open_doubleclick(self, i):
