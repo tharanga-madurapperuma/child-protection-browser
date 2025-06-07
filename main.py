@@ -27,11 +27,9 @@ class MainWindow(QMainWindow):
         self.last_dom_change_time = {}
         self.warning_label = QLabel()
         self.warning_label.setStyleSheet("""
-            background-color: #ff0000; 
-            color: white; 
-            font-weight: bold; 
-            padding: 5px;
-            border-radius: 5px;
+            background-color: #000000; 
+            border-radius: 3px;
+            color: #000000; 
         """)
         self.warning_label.hide()
         self.statusBar().addPermanentWidget(self.warning_label)

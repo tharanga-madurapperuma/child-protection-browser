@@ -11,13 +11,17 @@ class BrowserOverlay(QWidget):
         self.last_activity_time = time.time()
         self.inactivity_threshold = 2.0  # 2 seconds
         
+        # Initialize scroll position tracking
+        self.last_scroll_position = QPoint(0, 0)
+        self.scroll_threshold = 10  # pixels
+        
         # Detection matching thresholds
         self.position_threshold = 30  # pixels
         self.size_threshold = 0.3  # 30% size difference
         
         # Visual settings
-        self.fill_color = QColor(255, 0, 0, 120)  # Semi-transparent red
-        self.border_color = QColor(0, 0, 0, 200)
+        self.fill_color = QColor(0, 0, 0, 250)  # Semi-transparent red
+        self.border_color = QColor(0, 0, 0, 250)
         
         # Setup timers
         self.activity_timer = QTimer(self)
@@ -85,7 +89,7 @@ class BrowserOverlay(QWidget):
             self.stable_detections = self.detections.copy()
 
     def update_position(self):
-        """Standard position update"""
+        """Standard position update with scroll detection"""
         if not self.parent():
             return
             
@@ -95,6 +99,16 @@ class BrowserOverlay(QWidget):
         if not viewport.isValid():
             viewport = self.parent().rect()
         
+        # Get current scroll position
+        current_scroll = self.parent().page().scrollPosition()
+        
+        # Clear detections if scroll position changed significantly
+        if (abs(current_scroll.x() - self.last_scroll_position.x()) > self.scroll_threshold or 
+            abs(current_scroll.y() - self.last_scroll_position.y()) > self.scroll_threshold):
+            self.detections = []
+            self.update()
+        
+        self.last_scroll_position = current_scroll
         self.setGeometry(0, 0, int(viewport.width() * dpr), int(viewport.height() * dpr))
         self.update()
 
@@ -202,6 +216,11 @@ class BrowserOverlay(QWidget):
         """Track user activity"""
         if event.type() in (QEvent.MouseMove, QEvent.MouseButtonPress, QEvent.Wheel):
             self.last_activity_time = time.time()
+            # Clear detections immediately on any mouse interaction
+            if self.detections:
+                self.detections = []
+                self.hide()
+                self.update()
         return super().event(event)
 
     def cleanup(self):
