@@ -15,9 +15,8 @@ class ContentMonitor(QObject):
     def __init__(self, browser_window):
         super().__init__()
         self.class_thresholds = {
-            'violence': 0.85,
             'adult': 0.35,
-            'weapons': 0.45,
+            'weapons': 0.55,
             'drugs': 0.25,
             'gore': 0.25,
         }
@@ -75,16 +74,38 @@ class ContentMonitor(QObject):
             return
 
         now = time.time()
-        if now - self.last_process_time < self.adaptive_interval/1000:
-            return
-            
+        
+        # Check if we're on a video site
+        try:
+            current_url = self.browser.url()
+            is_video = current_url is not None and any(
+                vsite in current_url.toString().lower() 
+                for vsite in ["youtube", "tiktok", "vimeo"]
+            )
+        except Exception as e:
+            print(f"URL check error: {str(e)}")
+            is_video = False
+
+        # For video sites, we want to process at ~10fps regardless of processing time
+        if is_video:
+            min_interval = 0.1  # 100ms = 10fps
+            if now - self.last_process_time < min_interval:
+                return  # Don't process too frequently
+        else:
+            # For non-video sites, use adaptive timing
+            if now - self.last_process_time < self.adaptive_interval/1000:
+                return
+
         if not self.processing_lock.tryLock():
             return
             
         try:
             # Capture the visible portion
             self.current_pixmap = self.browser.grab()
-            
+            if self.current_pixmap.isNull():
+                print("Grab failed: Pixmap is null, skipping frame.")
+                return
+
             # Get viewport information
             viewport_size = self.browser.size()
             scroll_pos = self.browser.page().scrollPosition()
@@ -106,16 +127,16 @@ class ContentMonitor(QObject):
             
             self.last_process_time = now
             
-            # Dynamically adjust interval based on worker performance
-            if hasattr(self.yolo_worker, 'avg_process_time'):
-                target_fps = 10  # Our goal
+            # Adjust interval based on worker performance (only for non-video sites)
+            if not is_video and hasattr(self.yolo_worker, 'avg_process_time'):
+                target_fps = 10
                 current_fps = 1/max(0.001, self.yolo_worker.avg_process_time)
                 
-                if current_fps < target_fps * 0.8:  # If we're falling behind
+                if current_fps < target_fps * 0.8:
                     self.adaptive_interval = min(200, self.adaptive_interval + 10)
-                elif current_fps > target_fps * 1.2 and self.adaptive_interval > 50:  # If we can go faster
+                elif current_fps > target_fps * 1.2 and self.adaptive_interval > 50:
                     self.adaptive_interval = max(50, self.adaptive_interval - 10)
-                    
+                
                 self.timer.setInterval(self.adaptive_interval)
                 
         except Exception as e:

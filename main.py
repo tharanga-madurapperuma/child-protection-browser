@@ -14,6 +14,8 @@ from ultralytics import YOLO
 from text_extractor import extract_text_from_page
 from browser_overlay import BrowserOverlay
 from content_monitor import ContentMonitor
+# from nsfw_blur import scan_and_blur_nsfw_paragraphs
+
 from bridge import JSBridge
 
 import time
@@ -22,6 +24,8 @@ import time
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs):
         super(MainWindow, self).__init__(*args, **kwargs)
+
+        self.video_sites = ["youtube", "tiktok", "vimeo", "dailymotion", "twitch"]
 
         # Initialize warning system
         self.last_dom_change_time = {}
@@ -62,7 +66,9 @@ class MainWindow(QMainWindow):
 
         # Load default home page
         self.add_new_tab(QUrl('http://www.google.com'), 'Homepage')
+        self.resize(1280, 720)
         self.show()
+
 
     def setup_navigation_toolbar(self):
         """Initialize the navigation toolbar with buttons"""
@@ -176,6 +182,15 @@ class MainWindow(QMainWindow):
         browser = QWebEngineView()
         browser.setUrl(qurl)
 
+        # Clear detections on URL change
+        browser.urlChanged.connect(lambda q: self.clear_tab_detections(browser))
+    
+        # Clear detections on page load start
+        browser.loadStarted.connect(lambda: self.clear_tab_detections(browser))
+
+        browser.urlChanged.connect(lambda q, b=browser: self.update_urlbar(q, b))
+
+
         # Connect text extraction to loadFinished signal
         browser.loadFinished.connect(lambda ok: self.handle_page_loaded(browser, ok))
 
@@ -184,10 +199,23 @@ class MainWindow(QMainWindow):
             lambda: self.overlays[self.tabs.indexOf(browser)].update_position()
         )
 
+
         # Enable hardware acceleration
         browser.settings().setAttribute(QWebEngineSettings.Accelerated2dCanvasEnabled, True)
+        browser.settings().setAttribute(QWebEngineSettings.JavascriptCanOpenWindows, True)
+        browser.settings().setAttribute(QWebEngineSettings.LocalStorageEnabled, True)
+        browser.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+        browser.settings().setAttribute(QWebEngineSettings.PluginsEnabled, True)
+        browser.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, True)
         browser.settings().setAttribute(QWebEngineSettings.WebGLEnabled, True)
-        browser.settings().setAttribute(QWebEngineSettings.Accelerated2dCanvasEnabled, True)
+
+        # Fix for Pexels-like sites
+        browser.page().profile().setHttpUserAgent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/123.0.0.0 Safari/537.36"
+        )
+        browser.page().profile().setPersistentCookiesPolicy(QWebEngineProfile.ForcePersistentCookies)
+
+
 
         # Bridge setup
         bridge = JSBridge()
@@ -260,17 +288,35 @@ class MainWindow(QMainWindow):
         if not overlay:
             return
             
-        # Safely check for detections
-        has_detections = bool(detection_data and detection_data.get('detections'))
+        # Check if this is a video site
+        is_video = self.is_video_site(browser.url())
         
-        # Update warning label
-        if has_detections:
-            det_count = len(detection_data['detections'])
-            self.warning_label.setText(f"⚠️ Blocked {det_count} inappropriate regions")
-        self.warning_label.setVisible(has_detections)
-        
-        # Update overlay
-        overlay.set_detections(detection_data if has_detections else None)
+        # For video sites, always update detections (don't preserve old ones)
+        if is_video:
+            overlay.video_mode = True
+            has_detections = bool(detection_data and detection_data.get('detections'))
+            
+            if has_detections:
+                det_count = len(detection_data['detections'])
+                self.warning_label.setText(f"⚠️ Blocked {det_count} inappropriate regions")
+                # Force the warning label to stay visible for at least 1 second
+                QTimer.singleShot(1000, lambda: self.warning_label.setVisible(has_detections and overlay.video_mode))
+            else:
+                self.warning_label.setVisible(False)
+            
+            # Always update with new detections, don't preserve old ones
+            overlay.set_detections(detection_data if has_detections else None)
+        else:
+            # Original behavior for non-video sites
+            overlay.video_mode = False
+            has_detections = bool(detection_data and detection_data.get('detections'))
+            
+            if has_detections:
+                det_count = len(detection_data['detections'])
+                self.warning_label.setText(f"⚠️ Blocked {det_count} inappropriate regions")
+            self.warning_label.setVisible(has_detections)
+            
+            overlay.set_detections(detection_data if has_detections else None)
 
     # ADD NEW TAB ON DOUBLE CLICK ON TABS
     def tab_open_doubleclick(self, i):
@@ -346,14 +392,35 @@ class MainWindow(QMainWindow):
 
 
     # NAVIGATE TO PASSED URL
-    def navigate_to_url(self):  # Does not receive the Url
-        # GET URL TEXT
+    def navigate_to_url(self):
         q = QUrl(self.urlbar.text())
         if q.scheme() == "":
-            # pass http as default url schema
             q.setScheme("http")
 
-        self.tabs.currentWidget().setUrl(q)
+        browser = self.tabs.currentWidget()
+        # Clear detections before navigation
+        self.clear_tab_detections(browser)
+        browser.setUrl(q)
+
+        tab_index = self.tabs.currentIndex()
+
+        # 🧠 Safe reset of overlay geometry and monitor
+        if tab_index in self.overlays:
+            self.overlays[tab_index].hide()
+            self.overlays[tab_index].update_position()
+
+        if tab_index in self.monitors:
+            monitor = self.monitors[tab_index]
+            monitor.stop_monitoring()
+            monitor.start()
+
+    def clear_tab_detections(self, browser):
+        """Clear detections for a specific tab"""
+        tab_index = self.tabs.indexOf(browser)
+        if tab_index in self.overlays:
+            self.overlays[tab_index].clear_detections()
+            self.warning_label.hide()
+
 
 
     # NAVIGATE TO DEFAULT HOME PAGE
@@ -386,12 +453,37 @@ class MainWindow(QMainWindow):
             monitor.check_content()
 
     def handle_page_loaded(self, browser, ok):
-        """Handle page load completion"""
-        if ok:  # Only proceed if load was successful
-            print(f"Page loaded successfully: {browser.url().toString()}")
-            extract_text_from_page(browser)
-        else:
+        if not ok:
             print(f"Page failed to load: {browser.url().toString()}")
+            return
+
+        print(f"Page loaded successfully: {browser.url().toString()}")
+        extract_text_from_page(browser)
+        # from nsfw_blur import TextDetectionManager
+        # TextDetectionManager(browser)
+
+
+        tab_index = self.tabs.indexOf(browser)
+
+        # 🛠 Reconnect overlay update on scroll
+        browser.page().scrollPositionChanged.connect(
+            lambda: self.overlays[tab_index].update_position()
+        )
+
+        if tab_index in self.overlays:
+            self.overlays[tab_index].update_position()
+            self.overlays[tab_index].show()
+
+        if tab_index in self.monitors:
+            monitor = self.monitors[tab_index]
+            if not monitor.active:
+                monitor.start()
+
+    def is_video_site(self, url):
+        """Check if current URL is a video streaming site"""
+        url_str = url.toString().lower()
+        return any(video_site in url_str for video_site in self.video_sites)
+
 
 app = QApplication(sys.argv)
 app.setApplicationName("Child Protection Browser")  

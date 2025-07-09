@@ -4,4 +4,8 @@ detection_results/
 for_text_model/
 venv/
 
+models/
+
 best.pt
+yolov8s.pt
+yolo_worker.zip

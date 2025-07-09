@@ -11,6 +11,12 @@ class BrowserOverlay(QWidget):
         self.last_activity_time = time.time()
         self.inactivity_threshold = 2.0  # 2 seconds
         
+        # Video mode settings
+        self.video_mode = False
+        self.video_refresh_timer = QTimer(self)
+        self.video_refresh_timer.timeout.connect(self.clear_video_detections)
+        self.video_refresh_timer.start(100)  # 10fps
+        
         # Initialize scroll position tracking
         self.last_scroll_position = QPoint(0, 0)
         self.scroll_threshold = 10  # pixels
@@ -36,6 +42,30 @@ class BrowserOverlay(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground)
+
+        self.video_detection_expiry = {}  # Track when video detections should expire
+        self.video_box_duration = 1.0  # Keep boxes for 1 second in video mode
+
+    def clear_video_detections(self):
+        """Clear expired detections in video mode"""
+        if not self.video_mode:
+            return
+            
+        current_time = time.time()
+        expired_detections = []
+        
+        # Check which detections have expired
+        for i, detection in enumerate(self.detections):
+            if detection.get('detection_time', 0) + self.video_box_duration < current_time:
+                expired_detections.append(i)
+        
+        # Remove expired detections in reverse order
+        for i in sorted(expired_detections, reverse=True):
+            if i < len(self.detections):
+                self.detections.pop(i)
+        
+        if expired_detections:
+            self.update()
 
     def is_same_detection(self, det1, det2):
         """Check if two detections are the same object with tolerance"""
@@ -67,6 +97,9 @@ class BrowserOverlay(QWidget):
 
     def check_activity(self):
         """Clear detections on user activity"""
+        if self.video_mode:
+            return  # Don't clear on activity for video sites
+            
         current_time = time.time()
         if current_time - self.last_activity_time < self.inactivity_threshold:
             if self.detections:
@@ -140,34 +173,43 @@ class BrowserOverlay(QWidget):
                 except Exception as e:
                     print(f"Invalid detection coordinates: {str(e)}")
             
-            # Combine new and existing detections
-            combined = []
-            matched_indices = set()
-            
-            # First match existing detections
-            for existing in self.detections:
-                matched = False
-                for i, new_det in enumerate(new_detections):
-                    if i not in matched_indices and self.is_same_detection(existing, new_det):
-                        # Update position/confidence
-                        combined.append({
-                            'xyxy': new_det['xyxy'],
-                            'class': new_det['class'],
-                            'conf': max(existing['conf'], new_det['conf'])
-                        })
-                        matched_indices.add(i)
-                        matched = True
-                        break
+            # For video mode, always use new detections only
+            if self.video_mode:
+                # For video mode, add timestamp to new detections
+                current_time = time.time()
+                for det in new_detections:
+                    det['detection_time'] = current_time
+                self.detections = new_detections
+            else:
+                # Combine new and existing detections
+                combined = []
+                matched_indices = set()
                 
-                if not matched:
-                    combined.append(existing)  # Keep existing detection
+                # First match existing detections
+                for existing in self.detections:
+                    matched = False
+                    for i, new_det in enumerate(new_detections):
+                        if i not in matched_indices and self.is_same_detection(existing, new_det):
+                            # Update position/confidence
+                            combined.append({
+                                'xyxy': new_det['xyxy'],
+                                'class': new_det['class'],
+                                'conf': max(existing['conf'], new_det['conf'])
+                            })
+                            matched_indices.add(i)
+                            matched = True
+                            break
+                    
+                    if not matched:
+                        combined.append(existing)  # Keep existing detection
+                
+                # Add remaining new detections
+                for i, new_det in enumerate(new_detections):
+                    if i not in matched_indices:
+                        combined.append(new_det)
+                
+                self.detections = combined
             
-            # Add remaining new detections
-            for i, new_det in enumerate(new_detections):
-                if i not in matched_indices:
-                    combined.append(new_det)
-            
-            self.detections = combined
             self.update_position()
             self.show()
             self.update()
@@ -207,8 +249,7 @@ class BrowserOverlay(QWidget):
             painter.drawPath(path)
             
             painter.setPen(QPen(Qt.white, 1))
-            painter.drawText(QPoint(x1 + 5, y1 + 15), 
-                           f"{detection['class']} ({detection['conf']:.2f})")
+            # painter.drawText(QPoint(x1 + 5, y1 + 15), f"{detection['class']} ({detection['conf']:.2f})")
         except Exception as e:
             print(f"Drawing error: {str(e)}")
 
@@ -216,13 +257,16 @@ class BrowserOverlay(QWidget):
         """Track user activity"""
         if event.type() in (QEvent.MouseMove, QEvent.MouseButtonPress, QEvent.Wheel):
             self.last_activity_time = time.time()
-            # Clear detections immediately on any mouse interaction
             if self.detections:
-                self.detections = []
-                self.hide()
-                self.update()
+                self.clear_detections()
         return super().event(event)
 
     def cleanup(self):
         self.update_timer.stop()
+        self.video_refresh_timer.stop()
         self.detections.clear()
+
+    def clear_detections(self):
+        """Clear all current detections"""
+        self.detections = []
+        self.update()
