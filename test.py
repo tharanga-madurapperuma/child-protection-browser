@@ -1,16 +1,23 @@
 from ultralytics import YOLO
+import cv2
 
-# Load model using the correct path
+# Load your trained model
 model = YOLO("best.pt")
 
-
 # Run inference
-results = model("D:\Programming\Python\child-protection-browser\image4.jpeg")  # or replace with your image filename
+results = model("image4.jpeg")
 
-# Display result
-results[0].show()  # Built-in viewer
-results[0].save("weapons.jpg")  # Saves to current working directory
+# Correct way: display using OpenCV
+import matplotlib.pyplot as plt
 
+img_with_boxes = results[0].plot()
+plt.imshow(img_with_boxes[..., ::-1])  # Convert BGR to RGB
+plt.title("Detections")
+plt.axis("off")
+plt.show()
+
+# ✅ Save with custom name using OpenCV
+cv2.imwrite("weaponsNEWNEWNEW.jpg", results[0].plot())
 
 # from gradio_client import Client
 

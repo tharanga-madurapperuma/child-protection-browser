@@ -1,5 +1,5 @@
 # Core Requirements
-PyQt5==5.15.9
+PyQt5==5.15.11
 PyQtWebEngine==5.15.6
 numpy==1.24.4
 opencv-python==4.8.1.78
@@ -10,6 +10,3 @@ torchvision==0.16.2
 # Optional (for GPU support - uncomment if you have CUDA)
 # torch==2.1.2+cu118 --index-url https://download.pytorch.org/whl/cu118
 # torchvision==0.16.2+cu118 --index-url https://download.pytorch.org/whl/cu118
-
-# Development extras
-pyqt5-tools==5.15.9.3.3  # For Qt Designer

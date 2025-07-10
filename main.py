@@ -8,9 +8,7 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtWebEngineWidgets import *
 from PyQt5.QtWebChannel import QWebChannel
-from ultralytics import YOLO
 
-# Custom modules
 from text_extractor import extract_text_from_page
 from browser_overlay import BrowserOverlay
 from content_monitor import ContentMonitor

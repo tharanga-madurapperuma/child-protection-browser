@@ -1,4 +1,4 @@
-# Modified yolo_worker.py with dynamic tiling based on browser size
+# yolo_worker.py
 import threading
 import time
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -9,13 +9,31 @@ import numpy as np
 class YoloWorker(QObject):
     result_ready = pyqtSignal(list)
 
-    def __init__(self, model_path="best.pt", class_thresholds=None):
+    # yolo_worker.py (updated critical section)
+    def __init__(self, class_thresholds=None):
         super().__init__()
-        self.model = YOLO(model_path)
-        self.model.fuse()
-        self.model.eval()
-        if torch.cuda.is_available():
-            self.model.half()
+        try:
+            # Load model in inference-only mode
+            self.model = YOLO('best.pt', task='detect')
+            
+            # Explicitly set to evaluation mode
+            self.model.model.eval()
+            self.model.model.train = False  # Disable training mode
+            
+            # Freeze all parameters
+            for param in self.model.model.parameters():
+                param.requires_grad = False
+                
+            if torch.cuda.is_available():
+                self.model.to('cuda')
+                print("Using CUDA")
+            else:
+                self.model.to('cpu')
+                print("Using CPU")
+                
+        except Exception as e:
+            print(f"Failed to load YOLO model: {str(e)}")
+            raise
 
         self.class_thresholds = class_thresholds or {
             'adult': 0.35,
@@ -67,16 +85,18 @@ class YoloWorker(QObject):
 
                     tile = img[y1:y2, x1:x2]
 
-                    results = self.model.predict(
-                        tile,
-                        imgsz=640,
-                        conf=0.4,
-                        device='0' if torch.cuda.is_available() else 'cpu',
-                        half=True if torch.cuda.is_available() else False,
-                        max_det=8,
-                        verbose=False,
-                        augment=False
-                    )
+                    # Use the model in pure inference mode
+                    with torch.no_grad():
+                        results = self.model(
+                            tile,
+                            imgsz=640,
+                            conf=0.4,
+                            device='0' if torch.cuda.is_available() else 'cpu',
+                            half=True if torch.cuda.is_available() else False,
+                            max_det=8,
+                            verbose=False,
+                            augment=False
+                        )
 
                     for result in results:
                         for box in result.boxes:
