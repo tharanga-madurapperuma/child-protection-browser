@@ -125,24 +125,25 @@ class BrowserOverlay(QWidget):
         """Standard position update with scroll detection"""
         if not self.parent():
             return
-            
-        dpr = self.parent().devicePixelRatioF()
+
         viewport = self.parent().visibleRegion().boundingRect()
-        
         if not viewport.isValid():
             viewport = self.parent().rect()
-        
+
         # Get current scroll position
         current_scroll = self.parent().page().scrollPosition()
-        
+
         # Clear detections if scroll position changed significantly
         if (abs(current_scroll.x() - self.last_scroll_position.x()) > self.scroll_threshold or 
             abs(current_scroll.y() - self.last_scroll_position.y()) > self.scroll_threshold):
             self.detections = []
             self.update()
-        
+
         self.last_scroll_position = current_scroll
-        self.setGeometry(0, 0, int(viewport.width() * dpr), int(viewport.height() * dpr))
+
+        # ✅ IMPORTANT: do NOT scale by devicePixelRatio; Qt handles that internally
+        self.setGeometry(viewport)          # was: multiply width/height by DPR
+        self.raise_()                       # make sure we’re above the web content
         self.update()
 
     def set_detections(self, detection_data):
@@ -216,6 +217,11 @@ class BrowserOverlay(QWidget):
         except Exception as e:
             print(f"Overlay update failed: {str(e)}")
             self.hide()
+
+        self.update_position()
+        self.show()
+        self.raise_()   # ✅ ensure on top after new detections
+        self.update()
 
     def age_detections(self):
         """Increment age of all detections and remove old ones"""
