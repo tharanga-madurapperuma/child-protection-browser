@@ -8,11 +8,14 @@ from PyQt5.QtWidgets import *
 from PyQt5.QtGui import *
 from PyQt5.QtWebEngineWidgets import *
 from PyQt5.QtWebChannel import QWebChannel
+from ultralytics import YOLO
 
+# Custom modules
 from text_extractor import extract_text_from_page
 from browser_overlay import BrowserOverlay
 from content_monitor import ContentMonitor
-# from nsfw_blur import scan_and_blur_nsfw_paragraphs
+from nsfw_blur import TextDetectionManager
+
 
 from bridge import JSBridge
 
@@ -39,6 +42,9 @@ class MainWindow(QMainWindow):
         # Initialize content monitoring system
         self.monitors = {}  # To store monitors for each tab
         self.overlays = {}  # To store overlays for each tab
+
+        # For text detection
+        self.text_managers = {}
 
         # Set up web browser tabs
         self.tabs = QTabWidget()
@@ -78,7 +84,7 @@ class MainWindow(QMainWindow):
         back_btn = QAction(QIcon(os.path.join('icons', 'cil-arrow-circle-left.png')), "Back", self)
         back_btn.triggered.connect(lambda: self.tabs.currentWidget().back())
         navtb.addAction(back_btn)
-
+ 
         # Forward button
         next_btn = QAction(QIcon(os.path.join('icons', 'cil-arrow-circle-right.png')), "Forward", self)
         next_btn.triggered.connect(lambda: self.tabs.currentWidget().forward())
@@ -267,6 +273,14 @@ class MainWindow(QMainWindow):
         tab_index = self.tabs.addTab(browser, label)
         self.monitors[tab_index] = monitor
         self.overlays[tab_index] = overlay
+
+        # Text blur manager for this tab
+        txt_mgr = TextDetectionManager(browser)
+        self.text_managers[tab_index] = txt_mgr
+
+        # Re-scan on DOM changes
+        bridge.domChanged.connect(txt_mgr.handle_dom_changed)
+
         
         # Start monitoring if this is the current tab
         if tab_index == self.tabs.currentIndex():
@@ -329,9 +343,10 @@ class MainWindow(QMainWindow):
         # Clean up monitor and overlay
         monitor = self.monitors.get(i)
         if monitor:
-            monitor.stop_monitoring()   
-            monitor.thread.quit()
-            monitor.thread.wait()
+            monitor.stop_monitoring()
+            if hasattr(monitor, "worker_thread") and monitor.worker_thread.isRunning():
+                monitor.worker_thread.quit()
+                monitor.worker_thread.wait()
             del self.monitors[i]
 
         if i in self.overlays:
@@ -339,6 +354,12 @@ class MainWindow(QMainWindow):
             del self.overlays[i]
 
         self.tabs.removeTab(i)
+
+        txt_mgr = self.text_managers.get(i)
+        if txt_mgr:
+            txt_mgr.stop()
+            del self.text_managers[i]
+
 
     # UPDATE URL TEXT WHEN ACTIVE TAB IS CHANGED
     def update_urlbar(self, q, browser=None):
@@ -373,10 +394,21 @@ class MainWindow(QMainWindow):
         # Start monitoring for current tab, stop others
         for index, monitor in self.monitors.items():
             if index == i:
-                if not monitor.isRunning():
+                if not monitor.active:
                     monitor.start()
             else:
                 monitor.stop_monitoring()
+
+
+        # Enable text manager only on active tab
+        for index, mgr in self.text_managers.items():
+            if index == i:
+                # nothing to do; it runs on a timer
+                pass
+            else:
+                # pause others to reduce API calls (optional)
+                mgr.handle_dom_changed()  # clears queues/caches
+
 
 
     # UPDATE WINDOWS TITTLE
@@ -418,6 +450,11 @@ class MainWindow(QMainWindow):
         if tab_index in self.overlays:
             self.overlays[tab_index].clear_detections()
             self.warning_label.hide()
+        
+        tab_index = self.tabs.indexOf(browser)
+        if tab_index in self.text_managers:
+            self.text_managers[tab_index].handle_dom_changed()
+
 
 
 
