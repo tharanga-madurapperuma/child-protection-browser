@@ -1,23 +1,31 @@
 from ultralytics import YOLO
 import cv2
+import matplotlib.pyplot as plt
 
 # Load your trained model
 model = YOLO("best.pt")
 
-# Run inference
-results = model("image4.jpeg")
+# List of images
+images = ["testImages/image1.webp", "testImages/image2.jpg", "testImages/image4.jpeg"]
 
-# Correct way: display using OpenCV
-import matplotlib.pyplot as plt
+for i, img_path in enumerate(images):
+    # Run inference
+    results = model(img_path)
 
-img_with_boxes = results[0].plot()
-plt.imshow(img_with_boxes[..., ::-1])  # Convert BGR to RGB
-plt.title("Detections")
-plt.axis("off")
-plt.show()
+    # Get image with boxes
+    img_with_boxes = results[0].plot()
 
-# ✅ Save with custom name using OpenCV
-cv2.imwrite("weaponsNEWNEWNEW.jpg", results[0].plot())
+    # Show each image in a separate OpenCV window
+    window_name = f"Detections {i+1}"
+    cv2.imshow(window_name, img_with_boxes)
+
+    # Save output with unique name
+    cv2.imwrite(f"output_{i+1}.jpg", img_with_boxes)
+
+# Wait until a key is pressed, then close all windows
+cv2.waitKey(0)
+cv2.destroyAllWindows()
+
 
 # from gradio_client import Client
 
